@@ -6,7 +6,7 @@ A medium-interaction SSH and Telnet honeypot built with [Cowrie](https://github.
 
 ## What It Does
 
-- Emulates a fake Linux shell over SSH (port 2222) and Telnet (port 2223)
+- Emulates a fake Linux shell over SSH and Telnet on standard ports 22/23 via port redirection
 - Logs every login attempt, command typed, and file downloaded by attackers
 - Stores all captured data in a PostgreSQL database
 - Runs as an unprivileged system user with auto-start via systemd
@@ -30,7 +30,7 @@ A medium-interaction SSH and Telnet honeypot built with [Cowrie](https://github.
 - Ubuntu 20.04+
 - Python 3.8+
 - PostgreSQL 12+
-- Ports 2222 and 2223 accessible on your server
+- A non-standard port chosen for your real SSH access (e.g. 22222)
 
 ---
 
@@ -142,27 +142,33 @@ Reload PostgreSQL:
 sudo systemctl reload postgresql
 ```
 
-### 6. Open Firewall Ports (Cloud/VPS)
+### 6. Move Real SSH to a Non-Standard Port
 
-```bash
-ufw allow 2222/tcp
-ufw allow 2223/tcp
+Edit `/etc/ssh/sshd_config` and change:
+```
+#Port 22
+```
+to:
+```
+Port 22222
 ```
 
-### 7. Redirect Ports (Local VM only)
-
-To capture traffic on standard ports 22/23 and redirect to Cowrie:
-
+Open the new port and restart SSH:
 ```bash
-sudo iptables -t nat -A PREROUTING -p tcp --dport 22 -j REDIRECT --to-port 2222
-sudo iptables -t nat -A PREROUTING -p tcp --dport 23 -j REDIRECT --to-port 2223
+ufw allow 22222/tcp
+systemctl restart sshd
 ```
 
-Make rules persistent across reboots:
+> Open a **new terminal** and confirm you can connect on port 22222 before continuing. Do not close your current session until verified.
+
+### 7. Redirect Ports 22/23 to Cowrie
 
 ```bash
-sudo apt install iptables-persistent
-sudo netfilter-persistent save
+iptables -t nat -A PREROUTING -p tcp --dport 22 -j REDIRECT --to-port 2222
+iptables -t nat -A PREROUTING -p tcp --dport 23 -j REDIRECT --to-port 2223
+apt install iptables-persistent
+netfilter-persistent save
+ufw delete allow 22/tcp
 ```
 
 ### 8. Install Systemd Service
@@ -206,10 +212,16 @@ ss -tlnp | grep -E '(2222|2223)'
 **Connect to the honeypot to test it:**
 
 ```bash
-ssh root@<your-server-ip> -p 2222
+ssh root@<your-server-ip>
 ```
 
-Enter your password when prompted. You will land in Cowrie's fake shell — nothing executed here affects the real server.
+Port 22 now redirects to Cowrie. Enter your password when prompted and you will land in Cowrie's fake shell — nothing executed here affects the real server.
+
+**Connect to the real server:**
+
+```bash
+ssh root@<your-server-ip> -p 22222
+```
 
 ---
 
