@@ -1,0 +1,20 @@
+  [Unit]
+  Description=Cowrie SSH/Telnet Honeypot
+  After=network.target postgresql.service
+
+  [Service]
+  Type=forking
+  User=cowrie
+  Group=cowrie
+  WorkingDirectory=/home/cowrie/cowrie
+  Environment=VIRTUAL_ENV=/home/cowrie/cowrie/cowrie-env
+  Environment=PATH=/home/cowrie/cowrie/cowrie-env/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+  :/sbin:/bin
+  ExecStart=/home/cowrie/cowrie/cowrie-env/bin/twistd --pidfile=/home/cowrie/cowrie/cowrie.pid cowrie
+  ExecStop=/bin/kill $MAINPID
+  PIDFile=/home/cowrie/cowrie/cowrie.pid
+  Restart=on-failure
+  RestartSec=5
+
+  [Install]
+  WantedBy=multi-user.target

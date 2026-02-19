@@ -1,0 +1,9 @@
+/home/cowrie/cowrie/var/log/cowrie/*.json {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}
