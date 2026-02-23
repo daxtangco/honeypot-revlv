@@ -22,6 +22,7 @@ A medium-interaction SSH and Telnet honeypot built with [Cowrie](https://github.
 | `cowrie.service` | Systemd service for auto-start on boot |
 | `cowrie-logrotate` | Daily log rotation with 7-day retention |
 | `postgresql.py` | Patched Cowrie PostgreSQL output plugin |
+| `add_fs.py` | Script to inject a realistic corporate fake filesystem into Cowrie |
 
 ---
 
@@ -95,6 +96,8 @@ password = <your-password>
 port = 5432
 ```
 
+> **Note:** Cowrie binds internally to ports 2222 and 2223. The iptables rules in Step 7 redirect public ports 22 and 23 to these internal ports. From the outside, attackers hit standard port 22 and land directly in the honeypot — it looks exactly like a real SSH server.
+
 Edit `userdb.txt` and replace `<your-password>` with the same password:
 
 ```
@@ -153,13 +156,31 @@ to:
 Port 22222
 ```
 
-Open the new port and restart SSH:
+Open the new port in UFW (if active):
 ```bash
 ufw allow 22222/tcp
-systemctl restart sshd
+```
+
+**Ubuntu 24+ only — disable SSH socket activation:**
+
+On Ubuntu 24+, SSH uses socket-based activation which overrides the port in `sshd_config`. Disable it so the service respects your config:
+```bash
+systemctl disable --now ssh.socket
+systemctl enable --now ssh.service
+systemctl restart ssh
+```
+
+Verify SSH is listening on 22222:
+```bash
+ss -tlnp | grep sshd
 ```
 
 > Open a **new terminal** and confirm you can connect on port 22222 before continuing. Do not close your current session until verified.
+
+Once confirmed, kill the old SSH instance still on port 22 (use the PID from `ss -tlnp`):
+```bash
+kill <old-sshd-pid>
+```
 
 ### 7. Redirect Ports 22/23 to Cowrie
 
@@ -168,6 +189,10 @@ iptables -t nat -A PREROUTING -p tcp --dport 22 -j REDIRECT --to-port 2222
 iptables -t nat -A PREROUTING -p tcp --dport 23 -j REDIRECT --to-port 2223
 apt install iptables-persistent
 netfilter-persistent save
+```
+
+If UFW is active, remove the old port 22 rule:
+```bash
 ufw delete allow 22/tcp
 ```
 
@@ -193,6 +218,39 @@ Add cleanup cron jobs (run `crontab -e` as the `cowrie` user):
 0 4 * * * find /home/cowrie/cowrie/var/lib/cowrie/tty/ -type f -mtime +30 -delete
 ```
 
+### 10. Inject a Fake Corporate Filesystem (Optional)
+
+By default Cowrie ships with a basic Linux filesystem. `add_fs.py` extends it with realistic-looking corporate directories to make the honeypot more convincing to attackers.
+
+Entries added:
+
+| Path | Type |
+|---|---|
+| `/var/www/html/app/` | Web application root |
+| `/var/www/html/app/config/database.php` | Database credentials file (bait) |
+| `/var/www/html/app/config/.env` | Environment config (bait) |
+| `/var/www/html/app/logs/error.log` | Application error log |
+| `/home/jsmith/`, `/home/mlopez/`, `/home/admin/`, `/home/deploy/` | Fake employee home directories |
+| `/home/*/.ssh/authorized_keys` | SSH key files (bait) |
+| `/opt/app/config/settings.py` | Internal app config (bait) |
+| `/opt/app/logs/app.log` | Internal app log |
+
+Copy the script to the server and run it as root:
+
+```bash
+scp add_fs.py root@<your-server-ip>:/tmp/add_fs.py
+ssh root@<your-server-ip> "cd /home/cowrie/cowrie && cowrie-env/bin/python3 /tmp/add_fs.py && chown cowrie:cowrie src/cowrie/data/fs.pickle && systemctl restart cowrie"
+```
+
+Verify it worked by connecting to the honeypot and browsing the filesystem:
+
+```bash
+ssh root@<your-server-ip>
+ls /home
+ls /var/www/html/app
+ls /opt/app
+```
+
 ---
 
 ## Verification
@@ -211,11 +269,17 @@ ss -tlnp | grep -E '(2222|2223)'
 
 **Connect to the honeypot to test it:**
 
+If you previously connected to this server on port 22, clear the old host key first:
+```bash
+ssh-keygen -R <your-server-ip>
+```
+
+Then connect — port 22 now redirects to Cowrie:
 ```bash
 ssh root@<your-server-ip>
 ```
 
-Port 22 now redirects to Cowrie. Enter your password when prompted and you will land in Cowrie's fake shell — nothing executed here affects the real server.
+Enter your password when prompted and you will land in Cowrie's fake shell — nothing executed here affects the real server.
 
 **Connect to the real server:**
 
@@ -283,6 +347,7 @@ ssh root@<your-server-ip> "tail -f /home/cowrie/cowrie/var/log/cowrie/cowrie.jso
 | Cowrie install | `/home/cowrie/cowrie/` |
 | Config file | `/home/cowrie/cowrie/etc/cowrie.cfg` |
 | Credential auth | `/home/cowrie/cowrie/etc/userdb.txt` |
+| Fake filesystem | `/home/cowrie/cowrie/src/cowrie/data/fs.pickle` |
 | JSON logs | `/home/cowrie/cowrie/var/log/cowrie/` |
 | Output plugins | `/home/cowrie/cowrie/src/cowrie/output/` |
 | Downloaded files | `/home/cowrie/cowrie/var/lib/cowrie/downloads/` |
